@@ -1,0 +1,7 @@
+{
+  "name": "grimmory-cf-v2",
+  "private": true,
+  "type": "module",
+  "scripts": {"dev":"wrangler pages dev public","deploy":"wrangler pages deploy public --project-name grimmory-cf"},
+  "devDependencies": {"wrangler":"^4.0.0"}
+}
