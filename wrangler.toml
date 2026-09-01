@@ -2,5 +2,14 @@ name = "grimmory-cf"
 compatibility_date = "2026-09-01"
 pages_build_output_dir = "public"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "grimmory-db"
+database_id = "d73118f6-6a6b-435f-a8b9-dbda593e13a9"
+
+[[r2_buckets]]
+binding = "BOOKS"
+bucket_name = "grimmory-books"
+
 [vars]
 APP_NAME = "Grimmory CF"
