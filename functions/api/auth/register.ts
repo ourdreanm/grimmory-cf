@@ -33,19 +33,28 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const role = Number(count?.c || 0) === 0 ? "ADMIN" : "USER";
     const passwordHash = await hashPassword(password);
 
-    const result = await env.DB
+    await env.DB
       .prepare("INSERT INTO users(username,password_hash,role) VALUES(?,?,?)")
       .bind(username, passwordHash, role)
       .run();
 
-    const userId = Number(result.meta.last_row_id);
-    const session = await createSession(env.DB, userId);
+    // 不依赖 last_row_id，直接按唯一用户名读取新用户 ID。
+    const user = await env.DB
+      .prepare("SELECT id, username, role FROM users WHERE username = ? LIMIT 1")
+      .bind(username)
+      .first<any>();
+
+    if (!user?.id) {
+      throw new Error("用户已写入，但无法读取新用户ID");
+    }
+
+    const session = await createSession(env.DB, Number(user.id));
 
     return new Response(
       JSON.stringify({
         ok: true,
         firstAdmin: role === "ADMIN",
-        user: { username, role }
+        user: { username: user.username, role: user.role }
       }),
       {
         status: 201,
@@ -57,8 +66,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     );
   } catch (error) {
     console.error("register failed", error);
+    const message = error instanceof Error ? error.message : String(error);
     return Response.json(
-      { error: "注册失败：数据库操作异常，请查看 Cloudflare Pages Functions 日志" },
+      { error: `注册失败：${message}` },
       { status: 500 }
     );
   }
