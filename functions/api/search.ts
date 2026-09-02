@@ -184,6 +184,65 @@ async function searchOpenLibrary(
   }));
 }
 
+async function searchGoogleBooks(
+  q: string,
+  limit: number
+): Promise<SearchResult[]> {
+  const apiUrl = new URL("https://www.googleapis.com/books/v1/volumes");
+  apiUrl.searchParams.set("q", q);
+  apiUrl.searchParams.set("maxResults", String(Math.min(limit, 40)));
+  apiUrl.searchParams.set("printType", "books");
+  apiUrl.searchParams.set("orderBy", "relevance");
+
+  const response = await fetch(apiUrl.toString(), {
+    headers: { "Accept": "application/json" }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google Books returned ${response.status}`);
+  }
+
+  const data = await response.json() as any;
+  const items = Array.isArray(data.items) ? data.items : [];
+
+  return items.map((item: any): SearchResult => {
+    const info = item.volumeInfo || {};
+    const access = item.accessInfo || {};
+    const identifiers = Array.isArray(info.industryIdentifiers)
+      ? info.industryIdentifiers
+      : [];
+    const isbn = identifiers.find((x: any) => x.type === "ISBN_13")?.identifier
+      || identifiers.find((x: any) => x.type === "ISBN_10")?.identifier
+      || null;
+
+    return {
+      id: `googlebooks:${item.id}`,
+      title: info.title || "未知书名",
+      subtitle: info.subtitle || null,
+      author: Array.isArray(info.authors) ? info.authors.join(", ") : null,
+      description: info.description || null,
+      isbn,
+      publisher: info.publisher || null,
+      publish_date: info.publishedDate || null,
+      language: info.language || null,
+      page_count: info.pageCount || null,
+      file_type: null,
+      file_size: null,
+      file_key: null,
+      cover_key: null,
+      type: "book",
+      source: "external",
+      source_name: "Google Books",
+      available: access.viewability === "ALL_PAGES" || access.epub?.isAvailable === true || access.pdf?.isAvailable === true,
+      url: info.infoLink || item.selfLink || null,
+      cover_url: info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null,
+      year: info.publishedDate
+        ? Number(String(info.publishedDate).slice(0, 4)) || null
+        : null
+    };
+  });
+}
+
 export const onRequestGet: PagesFunction<Env> = async ({
   request,
   env
@@ -211,32 +270,39 @@ export const onRequestGet: PagesFunction<Env> = async ({
     );
   }
 
-  const [localResult, externalResult] = await Promise.allSettled([
+  const [localResult, openLibraryResult, googleBooksResult] = await Promise.allSettled([
     searchLocal(env.DB, q, limit),
-    searchOpenLibrary(q, limit)
+    searchOpenLibrary(q, limit),
+    searchGoogleBooks(q, limit)
   ]);
 
   const local = localResult.status === "fulfilled" ? localResult.value : [];
-  const external = externalResult.status === "fulfilled" ? externalResult.value : [];
+  const openLibrary = openLibraryResult.status === "fulfilled" ? openLibraryResult.value : [];
+  const googleBooks = googleBooksResult.status === "fulfilled" ? googleBooksResult.value : [];
 
   const errors: string[] = [];
   if (localResult.status === "rejected") {
     console.error("Local search error:", localResult.reason);
     errors.push("local");
   }
-  if (externalResult.status === "rejected") {
-    console.error("Open Library search error:", externalResult.reason);
+  if (openLibraryResult.status === "rejected") {
+    console.error("Open Library search error:", openLibraryResult.reason);
     errors.push("openlibrary");
   }
+  if (googleBooksResult.status === "rejected") {
+    console.error("Google Books search error:", googleBooksResult.reason);
+    errors.push("googlebooks");
+  }
 
-  const results = [...local, ...external];
+  const results = [...local, ...openLibrary, ...googleBooks];
 
   return Response.json({
     query: q,
     count: results.length,
     sources: [
       { name: "我的书库", type: "local", count: local.length },
-      { name: "Open Library", type: "external", count: external.length }
+      { name: "Open Library", type: "external", count: openLibrary.length },
+      { name: "Google Books", type: "external", count: googleBooks.length }
     ],
     results,
     ...(errors.length > 0 ? { source_errors: errors } : {})
