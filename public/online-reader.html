@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>在线阅读 · Grimmory CF</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0b0f14;color:#e8edf3;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{position:sticky;top:0;z-index:5;background:#111720ee;backdrop-filter:blur(12px);border-bottom:1px solid #27313d;padding:14px 18px;display:flex;gap:12px;align-items:center}button,a{border:1px solid #344252;background:#18212c;color:#e8edf3;border-radius:9px;padding:8px 12px;text-decoration:none;cursor:pointer}button:hover,a:hover{background:#202c3a}.title{font-weight:700;font-size:18px;flex:1}.meta{color:#8f9dad;font-size:13px}.wrap{max-width:900px;margin:0 auto;padding:28px 18px 80px}.bookhead{display:flex;gap:18px;align-items:flex-start;margin-bottom:25px}.cover{width:110px;height:160px;object-fit:cover;border-radius:8px;background:#151c25}.chapter{background:#111720;border:1px solid #27313d;border-radius:10px;padding:15px;margin:10px 0}.chapter h2{font-size:15px;margin:0 0 8px}.chapter pre{white-space:pre-wrap;word-break:break-word;line-height:1.95;font:inherit;color:#dce4ec;margin:0}.reader{background:#111720;border:1px solid #27313d;border-radius:12px;padding:25px;line-height:2;font-size:18px}.reader p{margin:0 0 1.2em}.tools{display:flex;gap:8px;flex-wrap:wrap}.notice{padding:12px;border:1px solid #394657;border-radius:9px;background:#151c25;color:#aeb9c5}.loading{text-align:center;color:#8f9dad;padding:40px}
+</style></head>
+<body>
+<header><a href="/">← 返回书库</a><div class="title" id="topTitle">在线阅读</div><button id="fontDown">A−</button><button id="fontUp">A＋</button></header>
+<main class="wrap">
+<section id="bookHead" class="bookhead"></section>
+<div id="tools" class="tools"></div>
+<div id="content" class="loading">正在加载……</div>
+</main>
+<script>
+const qs=new URLSearchParams(location.search);const id=Number(qs.get('id'));let font=18;
+const content=document.getElementById('content');
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function paragraphs(text){return String(text||'').replace(/\r/g,'').split(/\n{2,}/).map(x=>x.trim()).filter(Boolean).map(x=>`<p>${esc(x).replace(/\n/g,'<br>')}</p>`).join('')}
+async function load(){if(!id){content.innerHTML='<div class="notice">缺少作品 ID</div>';return}try{const r=await fetch('/api/gutenberg?id='+id);const d=await r.json();if(!r.ok)throw Error(d.error||'加载失败');document.getElementById('topTitle').textContent=d.title||'在线阅读';document.getElementById('bookHead').innerHTML=`${d.cover_url?`<img class="cover" src="${esc(d.cover_url)}" alt="">`:''}<div><h1>${esc(d.title)}</h1><div class="meta">${esc((d.authors||[]).map(a=>a.name).join('、'))}</div><p class="meta">来源：Project Gutenberg · 公共领域文本</p></div>`;document.getElementById('tools').innerHTML=`<a href="${esc(d.source_url)}" target="_blank" rel="noopener">查看原站</a><a href="${esc(d.text_url)}" target="_blank" rel="noopener">打开原文</a>`;const tr=await fetch(d.text_url);if(!tr.ok)throw Error('正文获取失败');const text=await tr.text();content.className='reader';content.innerHTML=paragraphs(text);document.querySelectorAll('.reader').forEach(x=>x.style.fontSize=font+'px')}catch(e){content.className='notice';content.textContent=e.message||'加载失败'}}
+document.getElementById('fontDown').onclick=()=>{font=Math.max(14,font-1);content.style.fontSize=font+'px'};document.getElementById('fontUp').onclick=()=>{font=Math.min(28,font+1);content.style.fontSize=font+'px'};load();
+</script></body></html>
