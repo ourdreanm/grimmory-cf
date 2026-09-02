@@ -1,5 +1,3 @@
-import { currentUser } from "../_lib/auth";
-
 interface Env { DB: D1Database; }
 
 function json(data: unknown, status = 200) {
@@ -87,9 +85,6 @@ async function getMetadata(sourceName: string, externalId: string) {
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const user = await currentUser(request, env.DB);
-  if (!user) return json({ error: "请先登录" }, 401);
-
   let body: any;
   try { body = await request.json(); } catch { return json({ error: "JSON 参数无效" }, 400); }
 
