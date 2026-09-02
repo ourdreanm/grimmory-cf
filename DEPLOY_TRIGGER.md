@@ -1,5 +1,5 @@
 # Deployment trigger
 
-The legacy Pages catch-all route `functions/api/file/[...key].ts` has been removed. The supported file endpoint is `functions/api/file.ts` using `?key=`.
+The unified resource search frontend and `/api/search` backend are now on `main`.
 
-This commit intentionally triggers a fresh Cloudflare Pages Git deployment from the current `main` branch.
+This commit intentionally triggers a fresh Cloudflare Pages Git deployment from the current `main` branch so the live site picks up the latest search UI and external search adapters.
