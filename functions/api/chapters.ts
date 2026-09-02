@@ -38,7 +38,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const chapter = await env.DB.prepare("SELECT id,work_id FROM chapters WHERE id=?").bind(chapterId).first<any>();
   if (!chapter) return json({ error: "章节不存在" }, 404);
 
+  const completed = position >= 0.98;
   await env.DB.prepare(`INSERT INTO user_chapter_progress(user_id,chapter_id,position) VALUES(?,?,?) ON CONFLICT(user_id,chapter_id) DO UPDATE SET position=excluded.position,updated_at=CURRENT_TIMESTAMP`).bind(user.id,chapterId,position).run();
-  await env.DB.prepare(`INSERT INTO user_library(user_id,work_id,status,last_chapter_id,progress) VALUES(?,?, 'reading',?,?) ON CONFLICT(user_id,work_id) DO UPDATE SET status=CASE WHEN user_library.status='completed' THEN user_library.status ELSE 'reading' END,last_chapter_id=excluded.last_chapter_id,progress=excluded.progress,updated_at=CURRENT_TIMESTAMP`).bind(user.id,Number(chapter.work_id),chapterId,position).run();
-  return json({ ok: true });
+  await env.DB.prepare(`INSERT INTO user_library(user_id,work_id,status,last_chapter_id,progress) VALUES(?,?,?, ?,?) ON CONFLICT(user_id,work_id) DO UPDATE SET status=CASE WHEN excluded.status='completed' THEN 'completed' WHEN user_library.status='completed' THEN user_library.status ELSE 'reading' END,last_chapter_id=excluded.last_chapter_id,progress=excluded.progress,updated_at=CURRENT_TIMESTAMP`).bind(user.id,Number(chapter.work_id),completed?'completed':'reading',chapterId,position).run();
+  return json({ ok: true, status: completed ? "completed" : "reading", progress: position });
 };
