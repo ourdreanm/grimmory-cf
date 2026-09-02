@@ -2,6 +2,9 @@ interface Env {
   DB: D1Database;
 }
 
+type SearchType = "book" | "novel" | "comic";
+type SearchSourceType = "local" | "external";
+
 interface SearchResult {
   id: string;
   title: string;
@@ -17,13 +20,39 @@ interface SearchResult {
   file_size?: number | null;
   file_key?: string | null;
   cover_key?: string | null;
-  type: "book";
-  source: "local" | "external";
+  type: SearchType;
+  source: SearchSourceType;
   source_name: string;
   available: boolean;
+  resource_available?: boolean;
   url?: string | null;
   cover_url?: string | null;
   year?: number | null;
+  categories?: string[];
+}
+
+interface SearchAdapter {
+  name: string;
+  type: SearchSourceType;
+  search(q: string, limit: number): Promise<SearchResult[]>;
+}
+
+function classifyType(values: unknown[]): SearchType {
+  const text = values
+    .flatMap((value) => Array.isArray(value) ? value : [value])
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/comic|comics|graphic novel|manga|manhua|manhwa|漫画|绘本/.test(text)) {
+    return "comic";
+  }
+
+  if (/fiction|novel|literature|小说|文学|言情|玄幻|科幻|悬疑|推理|武侠/.test(text)) {
+    return "novel";
+  }
+
+  return "book";
 }
 
 function mapLocalBook(book: any): SearchResult {
@@ -42,13 +71,17 @@ function mapLocalBook(book: any): SearchResult {
     file_size: book.file_size,
     file_key: book.file_key,
     cover_key: book.cover_key,
-    type: "book",
+    type: classifyType([book.title, book.subtitle, book.description]),
     source: "local",
     source_name: "我的书库",
     available: Boolean(book.file_key),
-    created_at: book.created_at,
-    updated_at: book.updated_at
-  } as SearchResult;
+    resource_available: Boolean(book.file_key),
+    url: null,
+    cover_url: null,
+    year: book.publish_date
+      ? Number(String(book.publish_date).slice(0, 4)) || null
+      : null
+  };
 }
 
 async function searchLocal(
@@ -73,9 +106,7 @@ async function searchLocal(
           b.file_type,
           b.file_size,
           b.file_key,
-          b.cover_key,
-          b.created_at,
-          b.updated_at
+          b.cover_key
         FROM books_fts f
         JOIN books b ON b.id = f.rowid
         WHERE books_fts MATCH ?
@@ -127,7 +158,8 @@ async function searchOpenLibrary(
     "number_of_pages_median",
     "cover_i",
     "edition_key",
-    "ebook_access"
+    "ebook_access",
+    "subject"
   ].join(",");
 
   const apiUrl = new URL("https://openlibrary.org/search.json");
@@ -149,39 +181,51 @@ async function searchOpenLibrary(
   const data = await response.json() as any;
   const docs = Array.isArray(data.docs) ? data.docs : [];
 
-  return docs.map((book: any, index: number): SearchResult => ({
-    id: `openlibrary:${book.key || index}`,
-    title: book.title || "未知书名",
-    subtitle: book.subtitle || null,
-    author: Array.isArray(book.author_name)
-      ? book.author_name.join(", ")
-      : null,
-    description: null,
-    isbn: Array.isArray(book.isbn) ? book.isbn[0] || null : null,
-    publisher: Array.isArray(book.publisher)
-      ? book.publisher[0] || null
-      : null,
-    publish_date: book.first_publish_year
-      ? String(book.first_publish_year)
-      : null,
-    language: Array.isArray(book.language)
-      ? book.language[0] || null
-      : null,
-    page_count: book.number_of_pages_median || null,
-    file_type: null,
-    file_size: null,
-    file_key: null,
-    cover_key: null,
-    type: "book",
-    source: "external",
-    source_name: "Open Library",
-    available: book.ebook_access === "public" || book.ebook_access === "borrowable",
-    url: book.key ? `https://openlibrary.org${book.key}` : "https://openlibrary.org",
-    cover_url: book.cover_i
-      ? `https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg`
-      : null,
-    year: book.first_publish_year || null
-  }));
+  return docs.map((book: any, index: number): SearchResult => {
+    const categories = Array.isArray(book.subject) ? book.subject.slice(0, 12) : [];
+    const type = classifyType([
+      book.title,
+      book.subtitle,
+      ...categories
+    ]);
+    const available = book.ebook_access === "public" || book.ebook_access === "borrowable";
+
+    return {
+      id: `openlibrary:${book.key || index}`,
+      title: book.title || "未知书名",
+      subtitle: book.subtitle || null,
+      author: Array.isArray(book.author_name)
+        ? book.author_name.join(", ")
+        : null,
+      description: null,
+      isbn: Array.isArray(book.isbn) ? book.isbn[0] || null : null,
+      publisher: Array.isArray(book.publisher)
+        ? book.publisher[0] || null
+        : null,
+      publish_date: book.first_publish_year
+        ? String(book.first_publish_year)
+        : null,
+      language: Array.isArray(book.language)
+        ? book.language[0] || null
+        : null,
+      page_count: book.number_of_pages_median || null,
+      file_type: null,
+      file_size: null,
+      file_key: null,
+      cover_key: null,
+      type,
+      source: "external",
+      source_name: "Open Library",
+      available,
+      resource_available: available,
+      url: book.key ? `https://openlibrary.org${book.key}` : "https://openlibrary.org",
+      cover_url: book.cover_i
+        ? `https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg`
+        : null,
+      year: book.first_publish_year || null,
+      categories
+    };
+  });
 }
 
 async function searchGoogleBooks(
@@ -214,6 +258,16 @@ async function searchGoogleBooks(
     const isbn = identifiers.find((x: any) => x.type === "ISBN_13")?.identifier
       || identifiers.find((x: any) => x.type === "ISBN_10")?.identifier
       || null;
+    const categories = Array.isArray(info.categories) ? info.categories : [];
+    const type = classifyType([
+      info.title,
+      info.subtitle,
+      ...categories,
+      info.mainCategory
+    ]);
+    const available = access.viewability === "ALL_PAGES"
+      || access.epub?.isAvailable === true
+      || access.pdf?.isAvailable === true;
 
     return {
       id: `googlebooks:${item.id}`,
@@ -230,17 +284,57 @@ async function searchGoogleBooks(
       file_size: null,
       file_key: null,
       cover_key: null,
-      type: "book",
+      type,
       source: "external",
       source_name: "Google Books",
-      available: access.viewability === "ALL_PAGES" || access.epub?.isAvailable === true || access.pdf?.isAvailable === true,
+      available,
+      resource_available: available,
       url: info.infoLink || item.selfLink || null,
       cover_url: info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null,
       year: info.publishedDate
         ? Number(String(info.publishedDate).slice(0, 4)) || null
-        : null
+        : null,
+      categories
     };
   });
+}
+
+const searchAdapters: SearchAdapter[] = [
+  { name: "我的书库", type: "local", search: searchLocal },
+  { name: "Open Library", type: "external", search: searchOpenLibrary },
+  { name: "Google Books", type: "external", search: searchGoogleBooks }
+];
+
+function normalizeText(value: string | null | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\\s\\p{P}\\p{S}]+/gu, "")
+    .trim();
+}
+
+function dedupeResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  const output: SearchResult[] = [];
+
+  for (const result of results) {
+    const isbn = normalizeText(result.isbn);
+    const title = normalizeText(result.title);
+    const author = normalizeText(result.author);
+    const key = isbn
+      ? `isbn:${isbn}`
+      : `title:${title}|author:${author}`;
+
+    if (!key || key === "title:|author:") {
+      output.push(result);
+      continue;
+    }
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(result);
+  }
+
+  return output;
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({
@@ -270,41 +364,49 @@ export const onRequestGet: PagesFunction<Env> = async ({
     );
   }
 
-  const [localResult, openLibraryResult, googleBooksResult] = await Promise.allSettled([
-    searchLocal(env.DB, q, limit),
-    searchOpenLibrary(q, limit),
-    searchGoogleBooks(q, limit)
-  ]);
+  const settled = await Promise.allSettled(
+    searchAdapters.map((adapter) => adapter.search(q, limit))
+  );
 
-  const local = localResult.status === "fulfilled" ? localResult.value : [];
-  const openLibrary = openLibraryResult.status === "fulfilled" ? openLibraryResult.value : [];
-  const googleBooks = googleBooksResult.status === "fulfilled" ? googleBooksResult.value : [];
-
+  const results: SearchResult[] = [];
+  const sources: Array<{ name: string; type: SearchSourceType; count: number }> = [];
   const errors: string[] = [];
-  if (localResult.status === "rejected") {
-    console.error("Local search error:", localResult.reason);
-    errors.push("local");
-  }
-  if (openLibraryResult.status === "rejected") {
-    console.error("Open Library search error:", openLibraryResult.reason);
-    errors.push("openlibrary");
-  }
-  if (googleBooksResult.status === "rejected") {
-    console.error("Google Books search error:", googleBooksResult.reason);
-    errors.push("googlebooks");
-  }
 
-  const results = [...local, ...openLibrary, ...googleBooks];
+  settled.forEach((result, index) => {
+    const adapter = searchAdapters[index];
+
+    if (result.status === "fulfilled") {
+      results.push(...result.value);
+      sources.push({
+        name: adapter.name,
+        type: adapter.type,
+        count: result.value.length
+      });
+      return;
+    }
+
+    console.error(`${adapter.name} search error:`, result.reason);
+    errors.push(adapter.name);
+    sources.push({
+      name: adapter.name,
+      type: adapter.type,
+      count: 0
+    });
+  });
+
+  const uniqueResults = dedupeResults(results);
 
   return Response.json({
     query: q,
-    count: results.length,
-    sources: [
-      { name: "我的书库", type: "local", count: local.length },
-      { name: "Open Library", type: "external", count: openLibrary.length },
-      { name: "Google Books", type: "external", count: googleBooks.length }
-    ],
-    results,
+    count: uniqueResults.length,
+    raw_count: results.length,
+    sources,
+    types: {
+      book: uniqueResults.filter((item) => item.type === "book").length,
+      novel: uniqueResults.filter((item) => item.type === "novel").length,
+      comic: uniqueResults.filter((item) => item.type === "comic").length
+    },
+    results: uniqueResults,
     ...(errors.length > 0 ? { source_errors: errors } : {})
   });
 };
