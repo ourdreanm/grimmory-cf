@@ -10,11 +10,9 @@ export const onRequestGet: PagesFunction<Env> = async ({
 
   const q = (url.searchParams.get("q") || "").trim();
 
+  const parsedLimit = Number(url.searchParams.get("limit") || 30);
   const limit = Math.min(
-    Math.max(
-      Number(url.searchParams.get("limit") || 30),
-      1
-    ),
+    Math.max(Number.isFinite(parsedLimit) ? Math.floor(parsedLimit) : 30, 1),
     100
   );
 
@@ -38,7 +36,8 @@ export const onRequestGet: PagesFunction<Env> = async ({
   }
 
   try {
-    const result = await env.DB
+    // 先使用 FTS5，适合英文等有明确分词边界的内容。
+    let result = await env.DB
       .prepare(`
         SELECT
           b.id,
@@ -66,6 +65,44 @@ export const onRequestGet: PagesFunction<Env> = async ({
       `)
       .bind(q, limit)
       .all();
+
+    // 中文默认 FTS5 分词可能无法按预期匹配，因此无结果时使用 LIKE 兜底。
+    if (!result.results?.length) {
+      const like = `%${q.replace(/[%_]/g, "\\$&")}%`;
+
+      result = await env.DB
+        .prepare(`
+          SELECT
+            b.id,
+            b.title,
+            b.subtitle,
+            b.author,
+            b.description,
+            b.isbn,
+            b.publisher,
+            b.publish_date,
+            b.language,
+            b.page_count,
+            b.file_type,
+            b.file_size,
+            b.file_key,
+            b.cover_key,
+            b.created_at,
+            b.updated_at
+          FROM books b
+          WHERE
+            b.title LIKE ? ESCAPE '\\'
+            OR b.subtitle LIKE ? ESCAPE '\\'
+            OR b.author LIKE ? ESCAPE '\\'
+            OR b.description LIKE ? ESCAPE '\\'
+            OR b.isbn LIKE ? ESCAPE '\\'
+            OR b.publisher LIKE ? ESCAPE '\\'
+          ORDER BY b.updated_at DESC
+          LIMIT ?
+        `)
+        .bind(like, like, like, like, like, like, limit)
+        .all();
+    }
 
     const results = (result.results || []).map(
       (book: any) => ({
